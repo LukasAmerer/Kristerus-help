@@ -1,0 +1,12 @@
+streamlit
+streamlit-option-menu
+Pillow
+requests
+beautifulsoup4
+duckduckgo-search
+python-dotenv
+openai
+huggingface_hub
+pymongo[srv]
+msal
+requests
