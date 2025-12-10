@@ -49,30 +49,29 @@ def scrape_website(url):
 
 def search_and_scrape(query, max_results=100):
     """
-    Searches for the query using DuckDuckGo and scrapes the top results.
+    Searches for the query using Google and scrapes the top results.
     """
-    from duckduckgo_search import DDGS
+    from googlesearch import search
     
     results = []
     try:
-        with DDGS() as ddgs:
-            search_results = list(ddgs.text(query, max_results=max_results, backend="html"))
-            
-        for res in search_results:
-            url = res['href']
+        # Google search
+        urls = list(search(query, num_results=max_results, lang="en"))
+        
+        for url in urls:
             scraped_data = scrape_website(url)
             if scraped_data['status'] == 'success':
                 results.append({
-                    'title': res['title'],
+                    'title': scraped_data.get('title', 'No Title'),
                     'url': url,
-                    'snippet': res['body'],
-                    'content': scraped_data['text']
+                    'snippet': scraped_data.get('text', '')[:200],
+                    'content': scraped_data.get('text', '')
                 })
             else:
                 results.append({
-                    'title': res['title'],
+                    'title': 'Failed to scrape',
                     'url': url,
-                    'snippet': res['body'],
+                    'snippet': '',
                     'content': f"Failed to scrape: {scraped_data.get('message', 'Unknown error')}"
                 })
                 

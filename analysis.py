@@ -90,6 +90,72 @@ def analyze_content_llm(scraped_results, query):
     except Exception as e:
         return {"error": str(e)}
 
+
+def extract_tool_names(scraped_results, department):
+    """
+    Uses LLM to extract actual AI tool names from scraped content.
+    Returns a list of dicts with tool_name, source_url, and description.
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return []
+
+    client = OpenAI(api_key=api_key)
+
+    # Prepare context from results
+    context = ""
+    for i, res in enumerate(scraped_results):
+        context += f"--- Page {i+1} ---\n"
+        context += f"Title: {res.get('title', 'Unknown')}\n"
+        context += f"URL: {res.get('url', 'Unknown')}\n"
+        content = res.get('content', '')[:1500]
+        context += f"Content: {content}\n\n"
+
+    system_prompt = (
+        "You are an AI tool researcher. Extract the names of specific AI tools mentioned in the content. "
+        "Focus on actual product/tool names (like ChatGPT, Jasper, HubSpot, Salesforce Einstein, etc.), "
+        "not generic terms like 'AI' or 'machine learning'. "
+        "For each tool, provide a one-line description of what it does."
+    )
+
+    user_prompt = (
+        f"Department context: {department}\n\n"
+        f"Extract AI tool names from this content:\n\n{context}\n\n"
+        "Return the tools in this exact format (one per line):\n"
+        "TOOL: [Tool Name] | DESC: [Brief description]\n"
+        "Only return real, specific tool names. Maximum 5 tools."
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.3
+        )
+        
+        # Parse the response
+        text = response.choices[0].message.content
+        tools = []
+        
+        for line in text.split('\n'):
+            if 'TOOL:' in line and '|' in line:
+                parts = line.split('|')
+                tool_name = parts[0].replace('TOOL:', '').strip()
+                description = parts[1].replace('DESC:', '').strip() if len(parts) > 1 else ''
+                if tool_name and len(tool_name) < 60:
+                    tools.append({
+                        'tool_name': tool_name,
+                        'description': description
+                    })
+        
+        return tools
+    except Exception as e:
+        print(f"⚠️ Tool extraction failed: {e}")
+        return []
+
 from huggingface_hub import InferenceClient
 
 def validate_with_apertus(council_analysis, query):

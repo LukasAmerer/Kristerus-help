@@ -18,7 +18,9 @@ class AzureADAuth:
         self.client_secret = os.getenv("AZURE_AD_CLIENT_SECRET")
         self.redirect_uri = os.getenv("AZURE_AD_REDIRECT_URI", "http://localhost:8501")
         
-        self.authority = f"https://login.microsoftonline.com/{self.tenant_id}"
+        # Use "common" to allow any Azure AD tenant + Microsoft accounts (fixes AADSTS50020)
+        # This supports federated identity providers (like university SSO)
+        self.authority = "https://login.microsoftonline.com/common"
         self.scope = ["User.Read"]
         
         # Check if credentials are configured

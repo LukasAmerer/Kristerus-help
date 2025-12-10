@@ -298,6 +298,7 @@ with st.container():
             icons=[None] * len(menu_options),
             default_index=0,
             orientation="horizontal",
+            key="main_nav_menu",
             styles={
                 "container": {
                     "padding": "20px 0px 0px 0px",
@@ -745,43 +746,46 @@ def render_anwendungen():
                             st.session_state[chat_key].append(("assistant", cached_result['answer']))
                             st.rerun()
                         
-                        # Cache MISS - generate with LLM and cache the result
-                        with st.spinner("🤔 LLM Council analysiert Ihre Frage..."):
-                            # Create context for the query
-                            context_query = f"{question} - Fokus: {dept_name}"
+                        # Try SLM with curated knowledge first
+                        with st.spinner("🤔 Suche in kuratiertem Wissen..."):
+                            from slm_service import answer_with_curated_knowledge
                             
-                            # Try LLM analysis first
-                            from analysis import analyze_content_llm, validate_with_apertus
+                            slm_result = answer_with_curated_knowledge(question, dept_name)
                             
-                            # For direct questions, we'll use the LLM without scraping
-                            # Create a mock result structure for the question
-                            mock_results = [{
-                                'title': f'{dept_name} KI-Tools',
-                                'url': 'internal',
-                                'content': f'Frage zum Bereich {dept_name}: {question}'
-                            }]
-                            
-                            llm_result = analyze_content_llm(mock_results, context_query)
-                            
-                            if "error" not in llm_result:
-                                council_answer = llm_result["analysis"]
+                            if slm_result.get("curated") and slm_result.get("answer"):
+                                # Successfully got answer from curated knowledge
+                                answer_text = slm_result["answer"]
                                 
-                                # Silently validate with Apertus in background (not shown to user)
-                                # This is for quality control only
-                                apertus_result = validate_with_apertus(council_answer, question)
+                                # Add source attribution
+                                sources = slm_result.get("sources", [])
+                                if sources:
+                                    answer_text += "\n\n---\n*Basierend auf kuratiertem Wissen*"
                                 
-                                # Cache the answer for future use
-                                cache.store_answer(question, dept_name, council_answer)
+                                # Cache for future use
+                                cache.store_answer(question, dept_name, answer_text)
+                                st.session_state[chat_key].append(("assistant", answer_text))
                                 
-                                # Always show just the Council answer, validation happens silently
-                                st.session_state[chat_key].append(("assistant", council_answer))
-                            else:
-                                # Fallback to simple response if LLM fails
-                                if llm_result["error"] == "No API key found":
-                                    answer = f"ℹ️ Für eine KI-gestützte Antwort zu '{question}' im Bereich {dept_name}, fügen Sie bitte einen OpenAI API Key in die .env Datei ein.\n\nPlatzhalter-Antwort: Diese Funktionalität wird mit dem LLM Council verbunden."
+                            elif slm_result.get("no_curated_data"):
+                                # No curated data - fall back to direct LLM
+                                from analysis import analyze_content_llm
+                                
+                                mock_results = [{
+                                    'title': f'{dept_name} KI-Tools',
+                                    'url': 'internal',
+                                    'content': f'Frage zum Bereich {dept_name}: {question}'
+                                }]
+                                
+                                llm_result = analyze_content_llm(mock_results, f"{question} - Fokus: {dept_name}")
+                                
+                                if "error" not in llm_result:
+                                    answer = llm_result["analysis"]
+                                    answer += "\n\n---\n*Hinweis: Diese Antwort wurde direkt generiert. Kuratiertes Wissen ist noch nicht verfügbar.*"
+                                    cache.store_answer(question, dept_name, answer)
+                                    st.session_state[chat_key].append(("assistant", answer))
                                 else:
-                                    answer = f"❌ Fehler bei der Analyse: {llm_result['error']}"
-                                st.session_state[chat_key].append(("assistant", answer))
+                                    st.session_state[chat_key].append(("assistant", f"❌ Fehler: {llm_result['error']}"))
+                            else:
+                                st.session_state[chat_key].append(("assistant", f"❌ Fehler: {slm_result.get('error', 'Unbekannt')}"))
                         
                         st.rerun()
             
@@ -826,37 +830,39 @@ def render_anwendungen():
                     st.session_state[chat_key].append(("assistant", cached_result['answer']))
                     st.rerun()
                 
-                # Cache MISS - generate with LLM and cache
-                with st.spinner("🤔 LLM Council analysiert Ihre Frage..."):
-                    context_query = f"{custom_question} - Fokus:  {dept_name}"
+                # Cache MISS - use SLM with curated knowledge
+                with st.spinner("🤔 Suche in kuratiertem Wissen..."):
+                    from slm_service import answer_with_curated_knowledge
                     
-                    from analysis import analyze_content_llm, validate_with_apertus
+                    slm_result = answer_with_curated_knowledge(custom_question, dept_name)
                     
-                    mock_results = [{
-                        'title': f'{dept_name} KI-Tools',
-                        'url': 'internal',
-                        'content': f'Frage zum Bereich {dept_name}: {custom_question}'
-                    }]
-                    
-                    llm_result = analyze_content_llm(mock_results, context_query)
-                    
-                    if "error" not in llm_result:
-                        council_answer = llm_result["analysis"]
+                    if slm_result.get("curated") and slm_result.get("answer"):
+                        answer_text = slm_result["answer"]
+                        sources = slm_result.get("sources", [])
+                        if sources:
+                            answer_text += "\n\n---\n*Basierend auf kuratiertem Wissen*"
+                        cache.store_answer(custom_question, dept_name, answer_text)
+                        st.session_state[chat_key].append(("assistant", answer_text))
                         
-                        # Silently validate with Apertus in background (not shown to user)
-                        apertus_result = validate_with_apertus(council_answer, custom_question)
+                    elif slm_result.get("no_curated_data"):
+                        # Fallback to direct LLM
+                        from analysis import analyze_content_llm
+                        mock_results = [{
+                            'title': f'{dept_name} KI-Tools',
+                            'url': 'internal',
+                            'content': f'Frage zum Bereich {dept_name}: {custom_question}'
+                        }]
+                        llm_result = analyze_content_llm(mock_results, f"{custom_question} - Fokus: {dept_name}")
                         
-                        # Cache the answer
-                        cache.store_answer(custom_question, dept_name, council_answer)
-                        
-                        # Always show just the Council answer
-                        st.session_state[chat_key].append(("assistant", council_answer))
-                    else:
-                        if llm_result["error"] == "No API key found":
-                            answer = f"ℹ️ Für eine KI-gestützte Antwort, fügen Sie bitte einen OpenAI API Key in die .env Datei ein."
+                        if "error" not in llm_result:
+                            answer = llm_result["analysis"]
+                            answer += "\n\n---\n*Hinweis: Diese Antwort wurde direkt generiert. Kuratiertes Wissen ist noch nicht verfügbar.*"
+                            cache.store_answer(custom_question, dept_name, answer)
+                            st.session_state[chat_key].append(("assistant", answer))
                         else:
-                            answer = f"❌ Fehler: {llm_result['error']}"
-                        st.session_state[chat_key].append(("assistant", answer))
+                            st.session_state[chat_key].append(("assistant", f"❌ Fehler: {llm_result['error']}"))
+                    else:
+                        st.session_state[chat_key].append(("assistant", f"❌ Fehler: {slm_result.get('error', 'Unbekannt')}"))
                 
                 st.rerun()
 
@@ -894,199 +900,285 @@ def render_partner():
 
 
 # ============================================================
-# SEITE 5: RESEARCH ASSISTANT – ChatGPT-artig
+# SEITE 5: RESEARCH ASSISTANT – Admin Dashboard with Styled Tabs
 # ============================================================
+
+# Auto-search queries for each department - English queries for better results
+AUTO_SEARCH_QUERIES = {
+    "Marketing": "best AI marketing tools 2024 Jasper Copy.ai HubSpot",
+    "Customer Success": "best AI customer service tools Intercom Zendesk Freshdesk",
+    "HR": "best AI HR recruiting tools Workday HireVue Greenhouse",
+    "Product": "best AI product development tools Notion Figma Miro",
+    "General": "best AI business tools ChatGPT Claude Gemini productivity"
+}
+
+def run_auto_search_if_needed(force=False):
+    """Check if daily auto-search is needed and run it."""
+    from datetime import datetime, timedelta
+    from db_cache import validated_results_manager
+    import os
+    
+    # Check last search timestamp
+    timestamp_file = os.path.join(os.path.dirname(__file__), '.last_auto_search')
+    
+    should_run = force  # Always run if forced
+    if not force and os.path.exists(timestamp_file):
+        with open(timestamp_file, 'r') as f:
+            last_run = f.read().strip()
+            try:
+                last_datetime = datetime.fromisoformat(last_run)
+                # Run if more than 24 hours have passed
+                if datetime.now() - last_datetime > timedelta(hours=24):
+                    should_run = True
+            except:
+                should_run = True
+    elif not force:
+        should_run = True
+    
+    if should_run:
+        print("🔄 Running daily auto-search for new AI tools...")
+        try:
+            from scraper import search_and_scrape
+            from analysis import analyze_content_llm, validate_with_apertus
+            
+            for dept, query in AUTO_SEARCH_QUERIES.items():
+                print(f"  Searching for {dept}...")
+                results = search_and_scrape(query, max_results=3)
+                
+                if results and "error" not in results[0]:
+                    # Use LLM Council to extract actual tool names
+                    from analysis import extract_tool_names
+                    extracted_tools = extract_tool_names(results, dept)
+                    
+                    if extracted_tools:
+                        # Store each extracted tool
+                        for tool in extracted_tools:
+                            # Find source URL from results
+                            source_url = results[0].get('url', '') if results else ''
+                            
+                            validated_results_manager.add_pending_result(
+                                query=query,
+                                department=dept,
+                                llm_analysis=tool.get('description', ''),
+                                apertus_validation="LLM Council extracted",
+                                tool_name=tool.get('tool_name'),
+                                source_url=source_url
+                            )
+                    else:
+                        # Fallback: store scraped page titles
+                        for result in results[:2]:
+                            validated_results_manager.add_pending_result(
+                                query=query,
+                                department=dept,
+                                llm_analysis=result.get('snippet', ''),
+                                apertus_validation="Direct scrape",
+                                tool_name=result.get('title', 'Unknown')[:60],
+                                source_url=result.get('url', '')
+                            )
+            
+            # Update timestamp
+            with open(timestamp_file, 'w') as f:
+                f.write(datetime.now().isoformat())
+            print("✅ Auto-search complete!")
+        except Exception as e:
+            print(f"⚠️ Auto-search failed: {e}")
+
+
 def render_research_assistant():
-    # Sidebar wie ChatGPT: Projekte
-    with st.sidebar:
-        st.markdown(
-            f"""
-            <div style="font-size: 18px; font-weight: 700; color: {GREEN}; margin: 10px 0 4px 0;">
-                Projekte
-            </div>
-            <div style="font-size: 12px; color: #555; margin-bottom: 12px;">
-                Lege Projekte an und wechsle zwischen ihnen – ähnlich wie Chats in ChatGPT.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        if "ra_projects" not in st.session_state:
-            st.session_state.ra_projects = ["Standard-Projekt"]
-
-        selected_project = st.radio(
-            "Aktives Projekt",
-            st.session_state.ra_projects,
-            index=0,
-            key="active_project_radio"
-        )
-
-        new_name = st.text_input("Neues Projekt anlegen", placeholder="z.B. KI für Kundenservice")
-        if st.button("Projekt hinzufügen"):
-            if new_name.strip():
-                st.session_state.ra_projects.append(new_name.strip())
-                st.success(f"Projekt '{new_name.strip()}' hinzugefügt.")
-
-        st.markdown("---")
-        st.markdown(
-            f"""
-            <div style="font-size: 12px; color: #555;">
-                <b>Beispiel-Rollen im LLM-Council:</b><br/>
-                • Strategische KI-Beratung<br/>
-                • Daten- &amp; Use-Case-Analyst<br/>
-                • Risiko &amp; Compliance<br/>
-                • Umsetzungs-Coach
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    # Main-Bereich: Titel
+    from db_cache import validated_results_manager
+    
+    # Auto-search disabled for now - runs in background separately
+    # run_auto_search_if_needed()
+    
+    # Custom CSS for styled tabs
+    st.markdown("""
+    <style>
+    /* Centered, rounded tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        max-width: 800px;
+        margin: 0 auto;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 20px !important;
+        padding: 8px 20px !important;
+        background-color: #f0f0f0 !important;
+        border: 2px solid #ccc !important;
+        font-weight: 600 !important;
+        color: #333 !important;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #00802F !important;
+        color: #ffffff !important;
+        border-color: #00802F !important;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e0e0e0 !important;
+        color: #000 !important;
+    }
+    /* Table styling */
+    .tool-row {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        background: #fafafa;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        border-left: 4px solid #00802F;
+    }
+    .tool-row.pending {
+        border-left-color: #ffa500;
+        background: #fffbf0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Header
     st.markdown(
         f"""
-        <div style="padding: 24px 80px 8px 80px; font-family: sans-serif;">
-            <div style="font-size: 28px; font-weight: 700; color: {GREEN}; margin-bottom: 4px;">
-                KMU Research Assistant
+        <div style="text-align: center; padding: 30px 20px 20px 20px;">
+            <div style="font-size: 32px; font-weight: 700; color: {GREEN}; margin-bottom: 8px;">
+                🔬 Research Assistant
             </div>
-            <div style="font-size: 13px; color: #555;">
-                Projekt: <b>{selected_project}</b> – dein persönlicher Arbeitsbereich mit LLM-Council.
+            <div style="font-size: 14px; color: #666; max-width: 500px; margin: 0 auto;">
+                Die KI sucht täglich automatisch nach neuen Tools. Aktivieren Sie relevante Einträge für die Nutzer.
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    # Tabs for Chat and Scraper
-    tab1, tab2 = st.tabs(["Chat Assistant", "Web Scraper"])
-
-    with tab1:
-        # Initialize the dictionary for all project chats if it doesn't exist
-        if "project_chats" not in st.session_state:
-            st.session_state.project_chats = {}
-
-        # Ensure the current project has an entry
-        if selected_project not in st.session_state.project_chats:
-            st.session_state.project_chats[selected_project] = []
-
-        # Display messages for the selected project
-        for role, content in st.session_state.project_chats[selected_project]:
-            with st.chat_message(role):
-                st.markdown(content)
-
-        prompt = st.chat_input("Frag den Research Assistant oder beschreibe dein Vorhaben …")
-        if prompt:
-            # Add user message to the specific project's history
-            st.session_state.project_chats[selected_project].append(("user", prompt))
+    
+    # Manual sync button
+    col_spacer1, col_btn, col_spacer2 = st.columns([3, 2, 3])
+    with col_btn:
+        if st.button("🔄 Neue Tools suchen", type="primary", use_container_width=True):
+            with st.spinner("Suche nach neuen KI-Tools für alle Abteilungen..."):
+                run_auto_search_if_needed(force=True)
+            st.success("Fertig! Neue Tools wurden hinzugefügt.")
+            st.rerun()
+    
+    # Department tabs
+    dept_names = ["Marketing", "Customer Success", "HR", "Product", "General"]
+    tabs = st.tabs(dept_names)
+    
+    for idx, dept_name in enumerate(dept_names):
+        with tabs[idx]:
+            # Get data for this department
+            pending = validated_results_manager.get_pending_results()
+            pending_dept = [r for r in pending if r.get('department') == dept_name]
+            approved = validated_results_manager.get_approved_by_department(dept_name)
             
-            # Display user message immediately
-            with st.chat_message("user"):
-                st.markdown(prompt)
-
-            # Generate and add assistant response
-            answer = (
-                f"Du hast im Projekt **{selected_project}** gefragt:\n\n"
-                f"> {prompt}\n\n"
-                "Für die Abgabe kannst du hier später die echte Logik einbauen "
-                "(LLM-Council, Analysen, Report-Generierung etc.)."
-            )
-            st.session_state.project_chats[selected_project].append(("assistant", answer))
+            # Combine all results with description
+            all_results = []
+            for r in approved:
+                desc = r.get('llm_analysis', '')[:200]
+                if len(r.get('llm_analysis', '')) > 200:
+                    desc += "..."
+                all_results.append({
+                    'id': r.get('result_id'),
+                    'tool_name': r.get('tool_name', r.get('query', 'Unbekannt'))[:40],
+                    'source_url': r.get('source_url', ''),
+                    'description': desc,
+                    'is_active': True
+                })
+            for r in pending_dept:
+                desc = r.get('llm_analysis', '')[:200]
+                if len(r.get('llm_analysis', '')) > 200:
+                    desc += "..."
+                all_results.append({
+                    'id': r.get('result_id'),
+                    'tool_name': r.get('tool_name', r.get('query', 'Unbekannt'))[:40],
+                    'source_url': r.get('source_url', ''),
+                    'description': desc,
+                    'is_active': False
+                })
             
-            with st.chat_message("assistant"):
-                st.markdown(answer)
-
-    with tab2:
-        st.markdown(
-            """
-            <div style="padding: 20px 0; font-family: sans-serif;">
-                <h3 style="color: #333;">Research & Web Scraper</h3>
-                <p style="color: #555; font-size: 14px;">
-                    Suche nach Themen (z.B. "Beste KI Tools für Marketing") oder gib eine spezifische URL ein.
-                    Das System sucht, scrapt und analysiert die Inhalte.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        search_mode = st.radio("Modus", ["URL Scrapen", "Web Suche"], horizontal=True)
-        
-        if search_mode == "URL Scrapen":
-            url_input = st.text_input("URL eingeben:", placeholder="https://example.com")
-            if st.button("Inhalt scrapen"):
-                if url_input:
-                    with st.spinner("Webseite wird analysiert..."):
-                        result = scrape_website(url_input)
-                        if result["status"] == "success":
-                            st.success("Erfolgreich gescrapt!")
-                            st.markdown(f"**Titel:** {result['title']}")
-                            with st.expander("Vollständigen Text anzeigen"):
-                                st.text_area("Inhalt", result["text"], height=400)
-                        else:
-                            st.error(f"Fehler beim Scrapen: {result['message']}")
-                else:
-                    st.warning("Bitte gib eine gültige URL ein.")
+            if all_results:
+                # Centered layout using columns
+                _, main_col, _ = st.columns([1, 6, 1])
+                
+                with main_col:
+                    st.markdown(f"<h3 style='text-align: center; color: #222; margin-bottom: 25px;'>{dept_name} - {len(all_results)} Tools</h3>", unsafe_allow_html=True)
                     
-        else: # Web Suche
-            query = st.text_input("Suchanfrage:", placeholder="Beste KI Tools für Buchhaltung")
-            if st.button("Suchen & Analysieren"):
-                if query:
-                    with st.spinner("Suche und analysiere Webseiten..."):
-                        results = search_and_scrape(query, max_results=3)
+                    # Styles for the rows - BLACK TEXT always
+                    st.markdown("""
+                    <style>
+                    .row-container {
+                        padding: 10px 0;
+                        border-bottom: 1px solid #eee;
+                    }
+                    .tool-link {
+                        color: #0066cc !important;
+                        text-decoration: none;
+                        font-size: 14px;
+                    }
+                    .tool-link:hover { text-decoration: underline; }
+                    div[data-testid="column"] { align-items: center; }
+                    div[data-testid="column"] p, div[data-testid="column"] span { color: #000 !important; }
+                    </style>
+                    """, unsafe_allow_html=True)
+
+                    # Header - BLACK TEXT - 4 columns now
+                    h1, h2, h3, h4 = st.columns([2, 2, 4, 2])
+                    h1.markdown("<span style='color: #000; font-weight: 700;'>Tool Name</span>", unsafe_allow_html=True)
+                    h2.markdown("<span style='color: #000; font-weight: 700;'>Website</span>", unsafe_allow_html=True)
+                    h3.markdown("<span style='color: #000; font-weight: 700;'>Beschreibung</span>", unsafe_allow_html=True)
+                    h4.markdown("<span style='color: #000; font-weight: 700;'>Aktion</span>", unsafe_allow_html=True)
+                    st.divider()
+
+                    # Data Rows - 4 columns
+                    for result in all_results:
+                        c1, c2, c3, c4 = st.columns([2, 2, 4, 2])
                         
-                        if results and "error" not in results[0]:
-                            st.success(f"{len(results)} relevante Seiten gefunden und analysiert.")
-                            
-                            # --- LLM Council Analysis ---
-                            st.markdown("### 🧠 LLM Council Analyse")
-                            
-                            # Try LLM analysis first
-                            llm_result = analyze_content_llm(results, query)
-                            
-                            if "error" not in llm_result:
-                                st.markdown(llm_result["analysis"])
-                                
-                                # --- Apertus Validation ---
-                                st.markdown("---")
-                                st.subheader("🇨🇭 Apertus Validation (Swiss AI)")
-                                with st.spinner("Apertus validiert die Antwort..."):
-                                    apertus_result = validate_with_apertus(llm_result["analysis"], query)
-                                    
-                                    if "error" not in apertus_result:
-                                        st.success("Validierung abgeschlossen")
-                                        st.markdown(apertus_result["validation"])
-                                    else:
-                                        st.error(f"Apertus konnte nicht validieren: {apertus_result['error']}")
-                                        st.info("Möglicherweise ist das Modell gerade überlastet oder benötigt einen HF_TOKEN in der .env Datei.")
-
-                            else:
-                                # Fallback or Error Message
-                                if llm_result["error"] == "No API key found":
-                                    st.warning("Kein OpenAI API Key gefunden. Fallback auf Keyword-Analyse.")
-                                    st.info("Füge einen API Key in die .env Datei ein, um die volle 'Council' Power zu nutzen.")
-                                    
-                                    # Fallback Heuristics
-                                    ranked_tools = analyze_content_heuristics(results)
-                                    if ranked_tools:
-                                        top_tool = ranked_tools[0][0]
-                                        st.markdown(f"**Top-Empfehlung (basierend auf Nennungen):** :trophy: **{top_tool}**")
-                                        for tool, count in ranked_tools:
-                                            st.write(f"- **{tool}**: {count} Nennungen")
-                                    else:
-                                        st.warning("Keine bekannten KI-Tools in den Suchergebnissen gefunden.")
-                                else:
-                                    st.error(f"Fehler bei der KI-Analyse: {llm_result['error']}")
-
-                            st.markdown("---")
-                            st.markdown("**Detaillierte Quellen:**")
-                            for i, res in enumerate(results):
-                                with st.expander(f"Quelle {i+1}: {res.get('title', 'Ohne Titel')}"):
-                                    st.markdown(f"**URL:** {res.get('url')}")
-                                    st.markdown(f"**Snippet:** {res.get('snippet')}")
-                                    st.text_area("Gescrapter Inhalt", res.get('content')[:1000] + "...", height=200)
+                        # Column 1: Name and Icon - BLACK TEXT
+                        icon = "✅" if result['is_active'] else "⏳"
+                        c1.markdown(f"<span style='color: #000; font-weight: 500; font-size:14px;'>{icon} {result['tool_name'][:20]}</span>", unsafe_allow_html=True)
+                        
+                        # Column 2: Link
+                        url = result['source_url']
+                        if url:
+                            domain = url.replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0]
+                            c2.markdown(f"<a href='{url}' target='_blank' class='tool-link'>🔗 {domain[:15]}</a>", unsafe_allow_html=True)
                         else:
-                            st.error(f"Fehler bei der Suche: {results[0].get('error') if results else 'Keine Ergebnisse'}")
-                else:
-                    st.warning("Bitte gib eine Suchanfrage ein.")
+                            c2.markdown("<span style='color: #999;'>—</span>", unsafe_allow_html=True)
+                        
+                        # Column 3: Description - BLACK TEXT
+                        desc = result.get('description', '')
+                        if desc:
+                            c3.markdown(f"<span style='color: #000; font-size: 13px;'>{desc}</span>", unsafe_allow_html=True)
+                        else:
+                            c3.markdown("<span style='color: #999; font-size: 13px;'>Keine Beschreibung</span>", unsafe_allow_html=True)
+                        
+                        # Column 4: Action Button
+                        with c4:
+                            if result['is_active']:
+                                st.button(f"🔽", key=f"btn_hide_{result['id']}", 
+                                         use_container_width=True,
+                                         type="secondary",
+                                         on_click=lambda rid=result['id']: validated_results_manager.revoke_approval(rid))
+                            else:
+                                st.button(f"✨", key=f"btn_show_{result['id']}", 
+                                         use_container_width=True, 
+                                         type="primary",
+                                         on_click=lambda rid=result['id']: validated_results_manager.approve_result(rid, st.session_state.get('user_email', 'admin')))
+                        
+                        # Divider between rows
+                        st.markdown("<div style='border-bottom: 1px solid #f0f0f0; margin: 4px 0;'></div>", unsafe_allow_html=True)
+
+            else:
+                st.info(f"Noch keine Tools für {dept_name}.")
+            
+            # Stats footer - centered
+            st.markdown(f"""
+            <div style="max-width: 600px; margin: 30px auto; background: linear-gradient(135deg, #e8f5e9, #c8e6c9); padding: 12px 24px; border-radius: 20px; text-align: center;">
+                <span style="font-size: 13px; color: #333;">
+                    ✅ <b>{len(approved)}</b> aktiv &nbsp;•&nbsp; 
+                    ⏳ <b>{len(pending_dept)}</b> ausstehend
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 
