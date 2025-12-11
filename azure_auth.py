@@ -91,11 +91,8 @@ azure_auth = AzureADAuth()
 def login_with_azure():
     """Handle Azure AD login flow"""
     
-    # Whitelist of allowed email addresses
-    ALLOWED_EMAILS = [
-        "alexander.spreckelsen@unisg.ch",
-        "lukas.amerer@student.unisg.ch"
-    ]
+    # Whitelist removed - allowing all users
+
     
     # Check if we have an auth code in URL parameters
     query_params = st.query_params
@@ -116,9 +113,8 @@ def login_with_azure():
                     user_email = user_info.get("mail") or user_info.get("userPrincipalName")
                     user_name = user_info.get("displayName")
                     
-                    # Check if email is in whitelist
-                    if user_email and user_email.lower() in [e.lower() for e in ALLOWED_EMAILS]:
-                        # Store in session
+                    if user_email:
+                        # Allow all authenticated users
                         st.session_state.logged_in = True
                         st.session_state.user_email = user_email
                         st.session_state.user_name = user_name
@@ -130,10 +126,7 @@ def login_with_azure():
                         st.success(f"✅ Welcome, {user_name}!")
                         st.rerun()
                     else:
-                        # Not authorized
-                        st.query_params.clear()
-                        st.error(f"❌ Access Denied: {user_email} is not authorized to access this application.")
-                        st.info("Only the following email addresses are allowed:\n\n" + "\n".join([f"• {email}" for email in ALLOWED_EMAILS]))
+                        st.error("Could not determine user email.")
                 else:
                     st.error("Failed to get user information")
             else:
@@ -160,22 +153,13 @@ def login_with_azure():
             password = st.text_input("Password", type="password", placeholder="••••••••", key="login_password_field")
             
             if st.button("🔓 Sign In", use_container_width=True, type="primary"):
-                # Simple validation for demo
-                ALLOWED_EMAILS = [
-                    "alexander.spreckelsen@unisg.ch",
-                    "lukas.amerer@student.unisg.ch"
-                ]
-                
                 if email and password:
-                    if email.lower() in [e.lower() for e in ALLOWED_EMAILS]:
-                        st.session_state.logged_in = True
-                        st.session_state.user_email = email
-                        st.session_state.user_name = email.split('@')[0].replace('.', ' ').title()
-                        st.success(f"✅ Welcome, {st.session_state.user_name}!")
-                        st.rerun()
-                    else:
-                        st.error(f"❌ Access Denied: {email} is not authorized.")
-                        st.info("Only the following emails are allowed:\n\n" + "\n".join([f"• {e}" for e in ALLOWED_EMAILS]))
+                    # Allow any user
+                    st.session_state.logged_in = True
+                    st.session_state.user_email = email
+                    st.session_state.user_name = email.split('@')[0].replace('.', ' ').title()
+                    st.success(f"✅ Welcome, {st.session_state.user_name}!")
+                    st.rerun()
                 else:
                     st.error("Please enter both email and password.")
             
