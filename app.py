@@ -804,67 +804,8 @@ def render_anwendungen():
                     with st.chat_message(role):
                         st.markdown(f"<div style='color: #000000;'>{content}</div>", unsafe_allow_html=True)
             
-            # Custom question input with more spacing
-            st.markdown("<div style='margin-top: 50px;'></div>", unsafe_allow_html=True)
-            st.markdown(
-                """
-                <div style="text-align: center; margin-bottom: 15px;">
-                    <p style="color: #000; font-weight: 600; font-size: 15px;">Eigene Frage stellen:</p>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-            custom_question = st.chat_input(f"Fragen Sie nach KI-Tools für {dept_name}...", key=f"{dept_name}_custom_input")
-            if custom_question:
-                # Add spacing before processing
-                st.markdown("<div style='margin-top: 30px;'></div>", unsafe_allow_html=True)
-                
-                st.session_state[chat_key].append(("user", custom_question))
-                
-                # Check cache first
-                from db_cache import cache
-                cached_result = cache.get_cached_answer(custom_question, dept_name)
-                
-                if cached_result:
-                    # Cache HIT - instant response!
-                    st.session_state[chat_key].append(("assistant", cached_result['answer']))
-                    st.rerun()
-                
-                # Cache MISS - use SLM with curated knowledge
-                with st.spinner("🤔 Suche in kuratiertem Wissen..."):
-                    from slm_service import answer_with_curated_knowledge
-                    
-                    slm_result = answer_with_curated_knowledge(custom_question, dept_name)
-                    
-                    if slm_result.get("curated") and slm_result.get("answer"):
-                        answer_text = slm_result["answer"]
-                        sources = slm_result.get("sources", [])
-                        if sources:
-                            answer_text += "\n\n---\n*Basierend auf kuratiertem Wissen*"
-                        cache.store_answer(custom_question, dept_name, answer_text)
-                        st.session_state[chat_key].append(("assistant", answer_text))
-                        
-                    elif slm_result.get("no_curated_data"):
-                        # Fallback to direct LLM
-                        from analysis import analyze_content_llm
-                        mock_results = [{
-                            'title': f'{dept_name} KI-Tools',
-                            'url': 'internal',
-                            'content': f'Frage zum Bereich {dept_name}: {custom_question}'
-                        }]
-                        llm_result = analyze_content_llm(mock_results, f"{custom_question} - Fokus: {dept_name}")
-                        
-                        if "error" not in llm_result:
-                            answer = llm_result["analysis"]
-                            answer += "\n\n---\n*Hinweis: Diese Antwort wurde direkt generiert. Kuratiertes Wissen ist noch nicht verfügbar.*"
-                            cache.store_answer(custom_question, dept_name, answer)
-                            st.session_state[chat_key].append(("assistant", answer))
-                        else:
-                            st.session_state[chat_key].append(("assistant", f"❌ Fehler: {llm_result['error']}"))
-                    else:
-                        st.session_state[chat_key].append(("assistant", f"❌ Fehler: {slm_result.get('error', 'Unbekannt')}"))
-                
-                st.rerun()
+            # Chat input removed as per request - only predefined questions allowed
+
 
 
 def render_angebot_team():
