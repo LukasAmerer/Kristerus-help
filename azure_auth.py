@@ -9,21 +9,28 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class AzureADAuth:
-    """Handles Microsoft Azure AD authentication"""
+    """
+    Handles Microsoft Azure AD authentication logic using the MSAL library.
+    Encapsulates the OIDC flow components: creating auth URLs, exchanging codes for tokens,
+    and fetching user profile data.
+    """
     
     def __init__(self):
-        """Initialize MSAL configuration"""
+        """
+        Initialize MSAL configuration from environment variables.
+        Checks for CLIENT_ID, TENANT_ID, and CLIENT_SECRET.
+        """
         self.client_id = os.getenv("AZURE_AD_CLIENT_ID")
         self.tenant_id = os.getenv("AZURE_AD_TENANT_ID")
         self.client_secret = os.getenv("AZURE_AD_CLIENT_SECRET")
         self.redirect_uri = os.getenv("AZURE_AD_REDIRECT_URI", "http://localhost:8501")
         
-        # Use "common" to allow any Azure AD tenant + Microsoft accounts (fixes AADSTS50020)
-        # This supports federated identity providers (like university SSO)
+        # Use "common" to allow any Azure AD tenant + Microsoft accounts.
+        # This endpoint supports multi-tenant apps and personal MS credentials.
         self.authority = "https://login.microsoftonline.com/common"
-        self.scope = ["User.Read"]
+        self.scope = ["User.Read"]  # Minimal scope to read basic profile info
         
-        # Check if credentials are configured
+        # Check if credentials are appropriately configured in .env
         if not all([self.client_id, self.tenant_id, self.client_secret]):
             print("⚠️ Azure AD credentials not configured. Using fallback authentication.")
             self.enabled = False
@@ -32,7 +39,13 @@ class AzureADAuth:
             print("✅ Azure AD authentication enabled")
     
     def get_auth_url(self):
-        """Get the authorization URL for user to login"""
+        """
+        Generates the Microsoft login URL.
+        This URL redirects the user to Microsoft's identity platform to sign in.
+        
+        Returns:
+            str: The authorization URL.
+        """
         if not self.enabled:
             return None
         
@@ -42,17 +55,27 @@ class AzureADAuth:
             client_credential=self.client_secret
         )
         
-        # Generate auth URL with prompt to always show account picker
+        # Build the auth request URL.
+        # 'prompt="select_account"' ensures the user sees the account picker, even if already logged in.
         auth_url = app.get_authorization_request_url(
             scopes=self.scope,
             redirect_uri=self.redirect_uri,
-            prompt="select_account"  # Force account picker to appear
+            prompt="select_account"
         )
         
         return auth_url
     
     def get_token_from_code(self, auth_code):
-        """Exchange authorization code for access token"""
+        """
+        Exchanges the temporary authorization code for an access token.
+        This is the second step of the OAuth 2.0 authorization code flow.
+        
+        Args:
+            auth_code (str): The code received from the callback URL.
+            
+        Returns:
+            dict: The token response from MSAL (contains access_token or error).
+        """
         if not self.enabled:
             return None
         
@@ -62,6 +85,7 @@ class AzureADAuth:
             client_credential=self.client_secret
         )
         
+        # Perform the exchange
         result = app.acquire_token_by_authorization_code(
             auth_code,
             scopes=self.scope,
@@ -71,10 +95,20 @@ class AzureADAuth:
         return result
     
     def get_user_info(self, access_token):
-        """Get user information from Microsoft Graph API"""
+        """
+        Fetches the user's profile from the Microsoft Graph API.
+        
+        Args:
+            access_token (str): The valid Bearer token.
+            
+        Returns:
+            dict: JSON response containing user profile (displayName, mail, etc.).
+        """
         import requests
         
         headers = {'Authorization': f'Bearer {access_token}'}
+        
+        # Call Graph API 'me' endpoint
         response = requests.get(
             'https://graph.microsoft.com/v1.0/me',
             headers=headers
